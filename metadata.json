@@ -1,0 +1,5 @@
+{
+  "name": "千里之行",
+  "description": "一个专为双人设计的实时积分管理应用，支持积分申请、审批、奖励兑换及历史记录。",
+  "requestFramePermissions": []
+}
