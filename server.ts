@@ -66,6 +66,17 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(creator_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS wishlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    creator_id INTEGER NOT NULL,
+    pair_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    is_completed INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(creator_id) REFERENCES users(id)
+  );
 `);
 
 // Migration: Add expected_date to rewards if it doesn't exist
@@ -121,7 +132,7 @@ app.post("/api/register", (req, res) => {
     const result = db.prepare("INSERT INTO users (username, password) VALUES (?, ?)").run(username, password);
     res.json({ id: result.lastInsertRowid, username });
   } catch (e) {
-    res.status(400).json({ error: "Username already exists" });
+    res.status(400).json({ error: "用户名已存在" });
   }
 });
 
@@ -131,7 +142,7 @@ app.post("/api/login", (req, res) => {
   if (user) {
     res.json(user);
   } else {
-    res.status(401).json({ error: "Invalid credentials" });
+    res.status(401).json({ error: "凭据无效" });
   }
 });
 
@@ -146,7 +157,7 @@ app.put("/api/user/:id", (req, res) => {
     }
     res.json({ success: true, username });
   } catch (e) {
-    res.status(400).json({ error: "Username already exists" });
+    res.status(400).json({ error: "用户名已存在" });
   }
 });
 
@@ -162,7 +173,7 @@ app.post("/api/pair/join", (req, res) => {
   const { userId, pairId } = req.body;
   const existingUsers = db.prepare("SELECT id FROM users WHERE pair_id = ?").all(pairId);
   if (existingUsers.length >= 2) {
-    return res.status(400).json({ error: "Pair is full" });
+    return res.status(400).json({ error: "配对已满" });
   }
   db.prepare("UPDATE users SET pair_id = ? WHERE id = ?").run(pairId, userId);
   broadcastToPair(userId, { type: "pair_update" });
@@ -210,7 +221,7 @@ app.post("/api/applications/:id/respond", (req, res) => {
   
   const application = db.prepare("SELECT * FROM applications WHERE id = ?").get(app_id) as any;
   if (!application || application.status !== 'pending') {
-    return res.status(400).json({ error: "Invalid application" });
+    return res.status(400).json({ error: "申请无效" });
   }
 
   const finalPoints = points !== undefined ? points : application.points;
@@ -258,13 +269,13 @@ app.post("/api/rewards/:id/redeem", (req, res) => {
   const reward = db.prepare("SELECT * FROM rewards WHERE id = ?").get(rewardId) as any;
   
   if (!user || !reward || user.points < reward.points_required) {
-    return res.status(400).json({ error: "Insufficient points" });
+    return res.status(400).json({ error: "积分不足" });
   }
   
   // Check if there's already a pending redemption for this reward by this user
   const pending = db.prepare("SELECT id FROM redemptions WHERE user_id = ? AND reward_id = ? AND status = 'pending'").get(userId, rewardId);
   if (pending) {
-    return res.status(400).json({ error: "Already requested" });
+    return res.status(400).json({ error: "已发送申请" });
   }
 
   db.prepare("INSERT INTO redemptions (user_id, reward_id, points_spent, status) VALUES (?, ?, ?, 'pending')")
@@ -317,7 +328,7 @@ app.post("/api/redemptions/:id/respond", (req, res) => {
   
   const redemption = db.prepare("SELECT * FROM redemptions WHERE id = ?").get(redemptionId) as any;
   if (!redemption || redemption.status !== 'pending') {
-    return res.status(400).json({ error: "Invalid request" });
+    return res.status(400).json({ error: "请求无效" });
   }
 
   db.prepare("UPDATE redemptions SET status = ? WHERE id = ?").run(status, redemptionId);
@@ -370,6 +381,34 @@ app.delete("/api/point-projects/:id", (req, res) => {
   // Basic security: check if user is in the same pair (omitted for brevity in this demo but good practice)
   db.prepare("DELETE FROM point_projects WHERE id = ?").run(req.params.id);
   broadcastToPair(userId, { type: "projects_updated" });
+  res.json({ success: true });
+});
+
+// Wishlist Routes
+app.post("/api/wishlist", (req, res) => {
+  const { creatorId, pairId, title, description } = req.body;
+  db.prepare("INSERT INTO wishlist (creator_id, pair_id, title, description) VALUES (?, ?, ?, ?)")
+    .run(creatorId, pairId, title, description);
+  broadcastToPair(creatorId, { type: "wishlist_updated" });
+  res.json({ success: true });
+});
+
+app.get("/api/wishlist/:pairId", (req, res) => {
+  const items = db.prepare("SELECT w.*, u.username as creator_name FROM wishlist w JOIN users u ON w.creator_id = u.id WHERE w.pair_id = ? ORDER BY w.created_at DESC").all(req.params.pairId);
+  res.json(items);
+});
+
+app.patch("/api/wishlist/:id/toggle", (req, res) => {
+  const { userId } = req.body;
+  db.prepare("UPDATE wishlist SET is_completed = 1 - is_completed WHERE id = ?").run(req.params.id);
+  broadcastToPair(userId, { type: "wishlist_updated" });
+  res.json({ success: true });
+});
+
+app.delete("/api/wishlist/:id", (req, res) => {
+  const { userId } = req.body;
+  db.prepare("DELETE FROM wishlist WHERE id = ?").run(req.params.id);
+  broadcastToPair(userId, { type: "wishlist_updated" });
   res.json({ success: true });
 });
 

@@ -17,12 +17,13 @@ import {
   Link as LinkIcon,
   ChevronRight,
   Sparkles,
-  Trash2
+  Trash2,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
-import { User, Application, Reward, HistoryItem, PointProject, RedemptionRequest } from './types';
+import { User, Application, Reward, HistoryItem, PointProject, RedemptionRequest, WishlistItem } from './types';
 
 // --- Components ---
 
@@ -83,8 +84,11 @@ const Input = ({ className, ...props }: React.InputHTMLAttributes<HTMLInputEleme
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [view, setView] = useState<'dashboard' | 'inbox' | 'store' | 'history'>('dashboard');
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [view, setView] = useState<'dashboard' | 'inbox' | 'store' | 'history' | 'wishlist'>('dashboard');
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -97,12 +101,20 @@ export default function App() {
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [projects, setProjects] = useState<PointProject[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
   const [ws, setWs] = useState<WebSocket | null>(null);
 
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [showRewardModal, setShowRewardModal] = useState(false);
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showWishlistModal, setShowWishlistModal] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('user', JSON.stringify(user));
+    }
+  }, [user]);
 
   const fetchUserData = useCallback(async () => {
     if (!user) return;
@@ -140,6 +152,13 @@ export default function App() {
     setProjects(data);
   }, [user?.pair_id]);
 
+  const fetchWishlist = useCallback(async () => {
+    if (!user?.pair_id) return;
+    const res = await fetch(`/api/wishlist/${user.pair_id}`);
+    const data = await res.json();
+    setWishlist(data);
+  }, [user?.pair_id]);
+
   const fetchHistory = useCallback(async () => {
     if (!user) return;
     const res = await fetch(`/api/history/${user.id}`);
@@ -154,6 +173,7 @@ export default function App() {
       fetchRewards();
       fetchProjects();
       fetchHistory();
+      fetchWishlist();
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const socket = new WebSocket(`${protocol}//${window.location.host}`);
@@ -187,6 +207,9 @@ export default function App() {
           case 'projects_updated':
             fetchProjects();
             break;
+          case 'wishlist_updated':
+            fetchWishlist();
+            break;
           case 'redemption_reminder':
             alert(`${data.from} 想要兑换 "${data.reward}"，但积分还差一点点，快去给 TA 加分吧！`);
             break;
@@ -216,7 +239,7 @@ export default function App() {
         setError(data.error);
       }
     } catch (err) {
-      setError('Connection failed');
+      setError('连接失败');
     } finally {
       setLoading(false);
     }
@@ -258,13 +281,13 @@ export default function App() {
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-brand-700 text-white mb-4 shadow-xl shadow-brand-700/20">
               <Heart size={32} fill="currentColor" />
             </div>
-            <h1 className="text-4xl font-black text-brand-700 tracking-tighter">小玫瑰养成记</h1>
+            <h1 className="text-4xl font-black text-brand-700 tracking-tighter">千里之行</h1>
           </div>
 
           <Card className="p-8 border-brand-100">
             <form onSubmit={handleAuth} className="space-y-6">
               <div>
-                <label className="block text-[10px] font-black text-brand-400 uppercase tracking-widest mb-2">Username</label>
+                <label className="block text-[10px] font-black text-brand-400 uppercase tracking-widest mb-2">用户名</label>
                 <Input 
                   value={username} 
                   onChange={e => setUsername(e.target.value)} 
@@ -274,7 +297,7 @@ export default function App() {
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-brand-400 uppercase tracking-widest mb-2">Password</label>
+                <label className="block text-[10px] font-black text-brand-400 uppercase tracking-widest mb-2">密码</label>
                 <Input 
                   type="password" 
                   value={password} 
@@ -312,7 +335,7 @@ export default function App() {
             <Heart className="text-white" size={20} fill="currentColor" />
           </div>
           <div>
-            <h1 className="text-lg font-black text-brand-700 leading-none tracking-tight">小玫瑰养成记</h1>
+            <h1 className="text-lg font-black text-brand-700 leading-none tracking-tight">千里之行</h1>
           </div>
         </div>
         
@@ -323,7 +346,7 @@ export default function App() {
           >
             <div className="text-right hidden sm:block">
               <div className="text-xs font-bold text-brand-900 leading-none">{user.username}</div>
-              <div className="text-[10px] font-medium text-brand-400 mt-0.5">My Profile</div>
+              <div className="text-[10px] font-medium text-brand-400 mt-0.5">个人资料</div>
             </div>
             <div className="w-8 h-8 bg-brand-200 rounded-lg flex items-center justify-center text-brand-600 group-hover:bg-brand-300 transition-colors">
               <UserIcon size={16} />
@@ -377,36 +400,50 @@ export default function App() {
                 onRefresh={fetchHistory}
               />
             )}
+            {view === 'wishlist' && (
+              <WishlistView 
+                wishlist={wishlist} 
+                onAddWish={() => setShowWishlistModal(true)}
+                onRefresh={fetchWishlist}
+                userId={user.id}
+              />
+            )}
           </div>
         )}
       </main>
 
       {/* Navigation */}
       {user.pair_id && (
-        <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 glass rounded-[2.5rem] px-6 py-4 z-50 shadow-2xl border-brand-100 flex items-center gap-8 min-w-[320px] justify-center">
+        <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 glass rounded-[2.5rem] px-6 py-4 z-50 shadow-2xl border-brand-100 flex items-center gap-6 min-w-[320px] justify-center text-slate-400">
           <NavButton 
             active={view === 'dashboard'} 
             onClick={() => setView('dashboard')} 
-            icon={<Trophy size={22} />} 
+            icon={<Trophy size={20} />} 
             label="主页" 
           />
           <NavButton 
             active={view === 'inbox'} 
             onClick={() => setView('inbox')} 
-            icon={<Inbox size={22} />} 
+            icon={<Inbox size={20} />} 
             label="收件箱" 
             badge={(applications.length + redemptionRequests.length) > 0 ? (applications.length + redemptionRequests.length) : undefined}
           />
           <NavButton 
             active={view === 'store'} 
             onClick={() => setView('store')} 
-            icon={<Store size={22} />} 
+            icon={<Store size={20} />} 
             label="商店" 
+          />
+          <NavButton 
+            active={view === 'wishlist'} 
+            onClick={() => setView('wishlist')} 
+            icon={<Star size={20} />} 
+            label="心愿" 
           />
           <NavButton 
             active={view === 'history'} 
             onClick={() => setView('history')} 
-            icon={<HistoryIcon size={22} />} 
+            icon={<HistoryIcon size={20} />} 
             label="记录" 
           />
         </nav>
@@ -445,6 +482,17 @@ export default function App() {
             projects={projects}
             onSuccess={() => {
               fetchProjects();
+            }}
+          />
+        )}
+        {showWishlistModal && (
+          <WishlistModal 
+            onClose={() => setShowWishlistModal(false)} 
+            creatorId={user.id}
+            pairId={user.pair_id!}
+            onSuccess={() => {
+              setShowWishlistModal(false);
+              fetchWishlist();
             }}
           />
         )}
@@ -521,17 +569,17 @@ function DashboardView({ user, onApply, onManageProjects }: { user: User, onAppl
                 <UserIcon size={24} className="text-brand-50" />
               </div>
               <span className="text-[10px] uppercase tracking-widest font-bold bg-white/10 px-3 py-1 rounded-full backdrop-blur-md text-brand-100">
-                My Balance
+                我的余额
               </span>
             </div>
             <div className="space-y-1">
               <h3 className="text-sm font-medium text-brand-200 font-serif italic">{user.username}</h3>
               <div className="text-6xl font-black tracking-tighter flex items-baseline gap-1">
                 {user.points}
-                <span className="text-lg font-medium text-brand-300">pts</span>
+                <span className="text-lg font-medium text-brand-300">分</span>
               </div>
               <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/5">
-                <div className="text-[10px] uppercase tracking-wider text-brand-300 font-bold">Total Earned</div>
+                <div className="text-[10px] uppercase tracking-wider text-brand-300 font-bold">累计获得</div>
                 <div className="text-sm font-bold text-brand-100">{user.total_points}</div>
               </div>
             </div>
@@ -548,17 +596,17 @@ function DashboardView({ user, onApply, onManageProjects }: { user: User, onAppl
                   <Heart size={24} />
                 </div>
                 <span className="text-[10px] uppercase tracking-widest font-bold bg-brand-50 text-brand-600 px-3 py-1 rounded-full">
-                  Partner
+                  另一半
                 </span>
               </div>
               <div className="space-y-1">
                 <h3 className="text-sm font-medium text-slate-400 font-serif italic">{user.partner.username}</h3>
                 <div className="text-6xl font-black tracking-tighter text-slate-900 flex items-baseline gap-1">
                   {user.partner.points}
-                  <span className="text-lg font-medium text-slate-400">pts</span>
+                  <span className="text-lg font-medium text-slate-400">分</span>
                 </div>
                 <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-50">
-                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Total Earned</div>
+                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">累计获得</div>
                   <div className="text-sm font-bold text-slate-600">{user.partner.total_points}</div>
                 </div>
               </div>
@@ -569,8 +617,8 @@ function DashboardView({ user, onApply, onManageProjects }: { user: User, onAppl
             <div className="p-4 bg-white rounded-full shadow-sm mb-4 animate-float">
               <LinkIcon className="text-brand-400" size={32} />
             </div>
-            <p className="text-lg font-serif italic text-brand-900">Waiting for your partner...</p>
-            <p className="text-xs text-brand-500 mt-1 max-w-[200px]">Share your unique pair ID to start your journey together.</p>
+            <p className="text-lg font-serif italic text-brand-900">等待另一半加入...</p>
+            <p className="text-xs text-brand-500 mt-1 max-w-[200px]">分享您的唯一配对 ID，开始你们的旅程。</p>
             <div className="mt-6 flex items-center gap-3 bg-white px-4 py-2 rounded-2xl border border-brand-100 shadow-sm">
               <span className="text-sm font-mono font-bold text-brand-600">{user.pair_id}</span>
               <button onClick={() => {
@@ -598,7 +646,7 @@ function DashboardView({ user, onApply, onManageProjects }: { user: User, onAppl
       )}
 
       <div className="pt-4">
-        <h4 className="text-[10px] font-black text-brand-400 mb-6 uppercase tracking-[0.2em] text-center">Quick Guide</h4>
+        <h4 className="text-[10px] font-black text-brand-400 mb-6 uppercase tracking-[0.2em] text-center">快捷指南</h4>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
           <GuideCard 
             icon={<Plus className="text-emerald-500" size={20} />} 
@@ -667,7 +715,7 @@ function InboxView({ applications, redemptionRequests, onRefresh }: {
       <div className="flex items-center justify-between">
         <h2 className="text-3xl font-black text-brand-900 tracking-tight">收件箱</h2>
         <span className="px-3 py-1 bg-brand-100 text-brand-700 text-[10px] font-black uppercase tracking-widest rounded-full">
-          {totalPending} Pending
+          {totalPending} 待处理
         </span>
       </div>
 
@@ -689,7 +737,7 @@ function InboxView({ applications, redemptionRequests, onRefresh }: {
                   <Card className="p-6 border-brand-100 rounded-3xl">
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <div className="text-[10px] font-black text-brand-400 uppercase tracking-widest mb-1">From {app.from_username}</div>
+                        <div className="text-[10px] font-black text-brand-400 uppercase tracking-widest mb-1">来自 {app.from_username}</div>
                         <h3 className="text-xl font-bold text-slate-900">{app.title}</h3>
                       </div>
                       <div className={cn(
@@ -753,7 +801,7 @@ function InboxView({ applications, redemptionRequests, onRefresh }: {
                   <Card className="p-6 border-brand-100 rounded-3xl">
                     <div className="flex justify-between items-start mb-6">
                       <div>
-                        <div className="text-[10px] font-black text-brand-400 uppercase tracking-widest mb-1">{req.from_username} wants to redeem</div>
+                        <div className="text-[10px] font-black text-brand-400 uppercase tracking-widest mb-1">来自 {req.from_username} 的兑换申请</div>
                         <h3 className="text-xl font-bold text-slate-900">{req.title}</h3>
                       </div>
                       <div className="text-3xl font-black tracking-tighter text-brand-600">
@@ -984,6 +1032,97 @@ function HistoryView({ history, onRefresh }: { history: HistoryItem[], onRefresh
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function WishlistView({ wishlist, onAddWish, onRefresh, userId }: {
+  wishlist: WishlistItem[],
+  onAddWish: () => void,
+  onRefresh: () => void,
+  userId: number
+}) {
+  const handleToggle = async (id: number) => {
+    await fetch(`/api/wishlist/${id}/toggle`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+    onRefresh();
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('确定删除这个心愿吗？')) return;
+    await fetch(`/api/wishlist/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+    onRefresh();
+  };
+
+  return (
+    <div className="space-y-8 pb-24">
+      <div className="flex items-center justify-between">
+        <h2 className="text-3xl font-black text-brand-900 tracking-tight">心愿清单</h2>
+        <Button onClick={onAddWish} variant="brand" size="sm" className="rounded-2xl">
+          <Plus size={16} /> 许愿
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        {wishlist.map(item => (
+          <Card key={item.id} className={cn(
+            "p-6 flex flex-col relative group transition-all",
+            item.is_completed ? "bg-slate-50 opacity-70" : "hover:border-brand-300"
+          )}>
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex-grow pr-10">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className={cn(
+                    "font-bold text-lg text-slate-900 leading-tight",
+                    item.is_completed && "line-through text-slate-400"
+                  )}>{item.title}</h3>
+                </div>
+                <div className="text-[10px] text-brand-400 font-bold uppercase tracking-widest">
+                  by {item.creator_name} · {format(new Date(item.created_at), 'yyyy-MM-dd')}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => handleToggle(item.id)}
+                  className={cn(
+                    "p-2 rounded-xl transition-all",
+                    item.is_completed ? "bg-brand-100 text-brand-600" : "bg-slate-50 text-slate-300 hover:text-brand-600"
+                  )}
+                >
+                  <Check size={18} />
+                </button>
+                <button 
+                  onClick={() => handleDelete(item.id)}
+                  className="p-2 text-slate-300 hover:text-rose-600 transition-all bg-slate-50 rounded-xl"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+            {item.description && (
+              <p className={cn(
+                "text-sm text-slate-500 leading-relaxed",
+                item.is_completed && "line-through"
+              )}>{item.description}</p>
+            )}
+          </Card>
+        ))}
+      </div>
+
+      {wishlist.length === 0 && (
+        <div className="text-center py-24 bg-white rounded-[3rem] border border-brand-100 card-shadow">
+          <Star size={48} className="mx-auto text-brand-200 mb-4 animate-float" />
+          <p className="text-brand-900 font-serif italic text-lg">心愿清单空空的</p>
+          <p className="text-brand-400 text-sm mt-1">写下想和 TA 一起完成的小惊喜吧</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1236,6 +1375,66 @@ function RewardModal({ onClose, creatorId, pairId, onSuccess }: {
           </div>
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? '保存中...' : '添加奖励'}
+          </Button>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
+function WishlistModal({ onClose, creatorId, pairId, onSuccess }: {
+  onClose: () => void,
+  creatorId: number,
+  pairId: string,
+  onSuccess: () => void
+}) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch('/api/wishlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creatorId, pairId, title, description }),
+      });
+      if (res.ok) onSuccess();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+      >
+        <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <h3 className="text-xl font-bold text-slate-900">写下一个心愿</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={24} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">心愿标题</label>
+            <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="例如：去海边看日出、一起吃超辣火锅" required />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">描述 (可选)</label>
+            <textarea 
+              className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition-all min-h-[100px]"
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="想怎么实现这个心愿呢？"
+            />
+          </div>
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? '许愿中...' : '发布心愿'}
           </Button>
         </form>
       </motion.div>

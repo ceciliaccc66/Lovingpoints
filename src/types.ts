@@ -65,3 +65,14 @@ export interface HistoryItem {
   from_user: string;
   to_user: string | null;
 }
+
+export interface WishlistItem {
+  id: number;
+  creator_id: number;
+  creator_name: string;
+  pair_id: string;
+  title: string;
+  description: string;
+  is_completed: number; // 0 or 1
+  created_at: string;
+}
